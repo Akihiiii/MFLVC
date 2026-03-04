@@ -12,7 +12,11 @@ from dataloader import load_data
 # Caltech-3V
 # Caltech-4V
 # Caltech-5V
-Dataname = 'MNIST-USPS'
+# ALOI-100
+# Mfeat
+# UCI
+# COIL20
+Dataname = 'COIL20'
 parser = argparse.ArgumentParser(description='test')
 parser.add_argument('--dataset', default=Dataname)
 parser.add_argument('--batch_size', default=256, type=int)
@@ -29,10 +33,15 @@ parser.add_argument("--high_feature_dim", default=128)
 args = parser.parse_args()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+if args.dataset in ["COIL20", "Mfeat", "UCI"]:
+    args.batch_size = 256
+if args.dataset == "ALOI-100":
+    args.batch_size = 1024
+
 dataset, dims, view, data_size, class_num = load_data(args.dataset)
 model = Network(view, dims, args.feature_dim, args.high_feature_dim, class_num, device)
 model = model.to(device)
-checkpoint = torch.load('./models/' + args.dataset + '.pth')
+checkpoint = torch.load('./models/' + args.dataset + '.pth', map_location=device)
 model.load_state_dict(checkpoint)
 print("Dataset:{}".format(args.dataset))
 print("Datasize:" + str(data_size))

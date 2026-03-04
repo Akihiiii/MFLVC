@@ -109,6 +109,95 @@ class Caltech(Dataset):
                 self.view4[idx]), torch.from_numpy(self.view3[idx])], torch.from_numpy(self.labels[idx]), torch.from_numpy(np.array(idx)).long()
 
 
+# class MultiViewDataset(Dataset):
+#     """
+#     通用多视图数据集加载类
+#     适用于 Mfeat, UCI-3view, COIL20, ALOI-100 等数据集
+#     数据格式：mat文件包含 'fea' (1, n_views) 和 'gt' (n_samples, 1)
+#     """
+#     def __init__(self, path, dataset_name, n_views):
+#         data = scipy.io.loadmat(path + dataset_name)
+#
+#         # 加载多视图特征
+#         fea = data['fea']  # shape: (1, n_views)
+#         self.views = []
+#         for i in range(n_views):
+#             view_data = fea[0, i].astype(np.float32)
+#             self.views.append(view_data)
+#
+#         # 加载标签 (MATLAB标签从1开始，转换为从0开始)
+#         self.labels = data['gt'].astype(np.int32).reshape(-1) - 1
+#         self.n_views = n_views
+#
+#     def __len__(self):
+#         return self.views[0].shape[0]
+#
+#     def __getitem__(self, idx):
+#         views = [torch.from_numpy(view[idx]) for view in self.views]
+#         return *views, torch.from_numpy(np.array(self.labels[idx])), torch.from_numpy(np.array(idx)).long()
+
+
+class MultiViewDataset3(Dataset):
+    """
+    三视图数据集
+    适用于 fea: (1, 3)
+    """
+
+    def __init__(self, path, dataset_name):
+        data = scipy.io.loadmat(path + dataset_name)
+
+        fea = data['fea']  # shape: (1, 3)
+
+        scaler = MinMaxScaler()
+        self.view1 = scaler.fit_transform(fea[0, 0].astype(np.float32))
+        self.view2 = scaler.fit_transform(fea[0, 1].astype(np.float32))
+        self.view3 = scaler.fit_transform(fea[0, 2].astype(np.float32))
+
+        # 标签从1开始 → 改成0开始
+        labels = data['gt'].astype(np.int32).reshape(-1) - 1
+        self.labels = labels
+
+    def __len__(self):
+        return self.view1.shape[0]
+
+    def __getitem__(self, idx):
+        return [
+            torch.from_numpy(self.view1[idx]),
+            torch.from_numpy(self.view2[idx]),
+            torch.from_numpy(self.view3[idx])
+        ], torch.from_numpy(np.array(self.labels[idx])), torch.from_numpy(np.array(idx)).long()
+
+class MultiViewDataset4(Dataset):
+    """
+    四视图数据集
+    适用于 fea: (1, 4)
+    """
+
+    def __init__(self, path, dataset_name):
+        data = scipy.io.loadmat(path + dataset_name)
+
+        fea = data['fea']  # shape: (1, 4)
+
+        scaler = MinMaxScaler()
+        self.view1 = scaler.fit_transform(fea[0, 0].astype(np.float32))
+        self.view2 = scaler.fit_transform(fea[0, 1].astype(np.float32))
+        self.view3 = scaler.fit_transform(fea[0, 2].astype(np.float32))
+        self.view4 = scaler.fit_transform(fea[0, 3].astype(np.float32))
+
+        labels = data['gt'].astype(np.int32).reshape(-1) - 1
+        self.labels = labels
+
+    def __len__(self):
+        return self.view1.shape[0]
+
+    def __getitem__(self, idx):
+        return [
+            torch.from_numpy(self.view1[idx]),
+            torch.from_numpy(self.view2[idx]),
+            torch.from_numpy(self.view3[idx]),
+            torch.from_numpy(self.view4[idx])
+        ], torch.from_numpy(np.array(self.labels[idx])), torch.from_numpy(np.array(idx)).long()
+
 def load_data(dataset):
     if dataset == "BDGP":
         dataset = BDGP('./data/')
@@ -158,6 +247,32 @@ def load_data(dataset):
         view = 5
         data_size = 1400
         class_num = 7
+    elif dataset == "Mfeat":
+        dataset = MultiViewDataset3('./data/', 'Mfeat.mat')
+        dims = [216, 76, 47]
+        view = 3
+        data_size = 2000
+        class_num = 10
+    elif dataset == "UCI":
+        dataset = MultiViewDataset3('./data/', 'UCI-3view.mat')
+        dims = [240, 76, 6]
+        view = 3
+        data_size = 2000
+        class_num = 10
+    elif dataset == "COIL20":
+        dataset = MultiViewDataset3('./data/', 'COIL20.mat')
+        dims = [1024, 3304, 6750]
+        view = 3
+        data_size = 1440
+        class_num = 20
+    elif dataset == "ALOI-100":
+        dataset = MultiViewDataset4('./data/', 'ALOI-100.mat')
+        dims = [77, 13, 64, 125]
+        view = 4
+        data_size = 10800
+        class_num = 100
     else:
         raise NotImplementedError
     return dataset, dims, view, data_size, class_num
+
+

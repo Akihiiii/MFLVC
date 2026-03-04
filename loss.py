@@ -46,10 +46,10 @@ class Loss(nn.Module):
     def forward_label(self, q_i, q_j):
         p_i = q_i.sum(0).view(-1)
         p_i /= p_i.sum()
-        ne_i = math.log(p_i.size(0)) + (p_i * torch.log(p_i)).sum()
+        ne_i = math.log(p_i.size(0)) + (p_i * torch.log(p_i + 1e-8)).sum()
         p_j = q_j.sum(0).view(-1)
         p_j /= p_j.sum()
-        ne_j = math.log(p_j.size(0)) + (p_j * torch.log(p_j)).sum()
+        ne_j = math.log(p_j.size(0)) + (p_j * torch.log(p_j + 1e-8)).sum()
         entropy = ne_i + ne_j
 
         q_i = q_i.t()

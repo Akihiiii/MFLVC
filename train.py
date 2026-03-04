@@ -21,18 +21,22 @@ from scipy.optimize import linear_sum_assignment
 # Caltech-3V
 # Caltech-4V
 # Caltech-5V
-Dataname = 'MNIST-USPS'
+# ALOI-100
+# Mfeat
+# UCI
+# COIL20
+Dataname = 'ALOI-100'
 parser = argparse.ArgumentParser(description='train')
 parser.add_argument('--dataset', default=Dataname)
-parser.add_argument('--batch_size', default=256, type=int)
+parser.add_argument('--batch_size', default=1024, type=int)
 parser.add_argument("--temperature_f", default=0.5)
 parser.add_argument("--temperature_l", default=1.0)
-parser.add_argument("--learning_rate", default=0.0003)
+parser.add_argument("--learning_rate", default=0.001)
 parser.add_argument("--weight_decay", default=0.)
 parser.add_argument("--workers", default=8)
-parser.add_argument("--mse_epochs", default=200)
-parser.add_argument("--con_epochs", default=50)
-parser.add_argument("--tune_epochs", default=50)
+parser.add_argument("--mse_epochs", default=250)
+parser.add_argument("--con_epochs", default=150)
+parser.add_argument("--tune_epochs", default=150)
 parser.add_argument("--feature_dim", default=512)
 parser.add_argument("--high_feature_dim", default=128)
 args = parser.parse_args()
@@ -64,6 +68,27 @@ if args.dataset == "Caltech-4V":
 if args.dataset == "Caltech-5V":
     args.con_epochs = 50
     seed = 5
+if args.dataset == "COIL20":
+    args.con_epochs = 50
+    seed = 5
+
+if args.dataset == "Mfeat":
+    args.con_epochs = 50
+    seed = 10
+
+if args.dataset == "ALOI-100":
+    args.con_epochs = 50
+    seed = 10
+
+if args.dataset == "UCI":
+    args.con_epochs = 50
+    seed = 10
+
+# Per-dataset batch size: small datasets need smaller batch to avoid excessive drop_last waste
+if args.dataset in ["COIL20", "Mfeat", "UCI"]:
+    args.batch_size = 256
+if args.dataset == "ALOI-100":
+    args.batch_size = 1024
 
 
 def setup_seed(seed):
