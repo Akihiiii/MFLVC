@@ -56,6 +56,11 @@ class Network(nn.Module):
             nn.Linear(feature_dim, class_num),
             nn.Softmax(dim=1)
         )
+
+        # 【创新点注入】: 引入可学习的聚类原型 (Prototypes)
+        self.prototypes = nn.Parameter(torch.Tensor(class_num, high_feature_dim))
+        nn.init.xavier_uniform_(self.prototypes)  # 初始化
+
         self.view = view
 
     def forward(self, xs):
@@ -63,6 +68,8 @@ class Network(nn.Module):
         qs = []
         xrs = []
         zs = []
+        # 将原型归一化，使其分布在超球面上
+        normalized_prototypes = normalize(self.prototypes, dim=1)
         for v in range(self.view):
             x = xs[v]
             z = self.encoders[v](x)
@@ -73,7 +80,7 @@ class Network(nn.Module):
             zs.append(z)
             qs.append(q)
             xrs.append(xr)
-        return hs, qs, xrs, zs
+        return hs, qs, xrs, zs, normalized_prototypes
 
     def forward_plot(self, xs):
         zs = []

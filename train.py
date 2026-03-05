@@ -25,17 +25,17 @@ from scipy.optimize import linear_sum_assignment
 # Mfeat
 # UCI
 # COIL20
-Dataname = 'ALOI-100'
+Dataname = 'UCI'
 parser = argparse.ArgumentParser(description='train')
 parser.add_argument('--dataset', default=Dataname)
-parser.add_argument('--batch_size', default=1024, type=int)
+parser.add_argument('--batch_size', default=256, type=int)
 parser.add_argument("--temperature_f", default=0.5)
 parser.add_argument("--temperature_l", default=1.0)
-parser.add_argument("--learning_rate", default=0.001)
+parser.add_argument("--learning_rate", default=0.0001)
 parser.add_argument("--weight_decay", default=0.)
 parser.add_argument("--workers", default=8)
-parser.add_argument("--mse_epochs", default=250)
-parser.add_argument("--con_epochs", default=150)
+parser.add_argument("--mse_epochs", default=1500)
+parser.add_argument("--con_epochs", default=100)
 parser.add_argument("--tune_epochs", default=150)
 parser.add_argument("--feature_dim", default=512)
 parser.add_argument("--high_feature_dim", default=128)
@@ -111,6 +111,40 @@ data_loader = torch.utils.data.DataLoader(
         drop_last=True,
     )
 
+import torch.nn.functional as F
+
+@torch.no_grad()
+def sinkhorn_knopp(scores, epsilon=0.05, iterations=3):
+    """
+    计算最优传输矩阵 (Sinkhorn 算法)
+    :param scores: 特征与原型的内积相似度矩阵, shape: [batch_size, class_num]
+    :param epsilon: 熵正则化系数，控制分配的平滑程度 (越小越接近硬聚类，越大越均匀)
+    :param iterations: Sinkhorn 迭代次数
+    :return: 最优传输分配矩阵 (软伪标签), shape: [batch_size, class_num]
+    """
+    # 转置，shape变为 [class_num, batch_size]
+    Q = torch.exp(scores / epsilon).t()
+
+    # 记录批次大小 (B) 和类别数量 (K)
+    K, B = Q.shape
+
+    # 避免数值溢出
+    sum_Q = torch.sum(Q)
+    Q /= sum_Q
+
+    for _ in range(iterations):
+        # 归一化行: 强制每个簇 (prototype) 能够被均匀分配到样本，避免空簇发生
+        sum_of_rows = torch.sum(Q, dim=1, keepdim=True)
+        Q /= sum_of_rows
+        Q /= K
+
+        # 归一化列: 强制每个样本属于各个簇的概率和为 1
+        Q /= torch.sum(Q, dim=0, keepdim=True)
+        Q /= B
+
+    # 放大回样本维度的正常概率和，并转置回 [batch_size, class_num]
+    Q *= B
+    return Q.t()
 
 def pretrain(epoch):
     tot_loss = 0.
@@ -119,7 +153,8 @@ def pretrain(epoch):
         for v in range(view):
             xs[v] = xs[v].to(device)
         optimizer.zero_grad()
-        _, _, xrs, _ = model(xs)
+        # 修改后 (加上第五个接收位):
+        _, _, xrs, _, _ = model(xs)
         loss_list = []
         for v in range(view):
             loss_list.append(criterion(xs[v], xrs[v]))
@@ -130,25 +165,75 @@ def pretrain(epoch):
     print('Epoch {}'.format(epoch), 'Loss:{:.6f}'.format(tot_loss / len(data_loader)))
 
 
+# def contrastive_train(epoch):
+#     tot_loss = 0.
+#     mes = torch.nn.MSELoss()
+#     for batch_idx, (xs, _, _) in enumerate(data_loader):
+#         for v in range(view):
+#             xs[v] = xs[v].to(device)
+#         optimizer.zero_grad()
+#         # 修改后:
+#         hs, qs, xrs, zs, prototypes = model(xs)
+#         loss_list = []
+#         for v in range(view):
+#             for w in range(v+1, view):
+#                 loss_list.append(criterion.forward_feature(hs[v], hs[w]))
+#                 loss_list.append(criterion.forward_label(qs[v], qs[w]))
+#             loss_list.append(mes(xs[v], xrs[v]))
+#         loss = sum(loss_list)
+#         loss.backward()
+#         optimizer.step()
+#         tot_loss += loss.item()
+#     print('Epoch {}'.format(epoch), 'Loss:{:.6f}'.format(tot_loss/len(data_loader)))
+
+
 def contrastive_train(epoch):
     tot_loss = 0.
     mes = torch.nn.MSELoss()
+
+    # 新增超参数：OT 损失的权重，你可以根据数据集在 0.1 到 1.0 之间调优
+    lambda_ot = 0.5
+
     for batch_idx, (xs, _, _) in enumerate(data_loader):
         for v in range(view):
             xs[v] = xs[v].to(device)
+
         optimizer.zero_grad()
-        hs, qs, xrs, zs = model(xs)
+
+        # 获取所有输出，包括我们新增的原型 (prototypes)
+        hs, qs, xrs, zs, prototypes = model(xs)
         loss_list = []
+
         for v in range(view):
-            for w in range(v+1, view):
+            # 1. 基础的自编码器重构损失 (防止特征坍缩)
+            loss_list.append(mes(xs[v], xrs[v]))
+
+            # 2. 原版的多视图特征 & 标签对比损失 (保留原始论文的跨视图一致性)
+            for w in range(v + 1, view):
                 loss_list.append(criterion.forward_feature(hs[v], hs[w]))
                 loss_list.append(criterion.forward_label(qs[v], qs[w]))
-            loss_list.append(mes(xs[v], xrs[v]))
+
+            # 3. 【创新点】最优传输 (OT) 聚类对齐损失
+            # 计算当前视图高层特征与原型的余弦相似度
+            # 因为 hs[v] 和 prototypes 在网络内部都已经做了 normalize
+            scores = torch.matmul(hs[v], prototypes.T)  # [batch_size, class_num]
+
+            # 我们用 detach() 截断梯度，让 target 仅作为监督信号指导当前步
+            T_target = sinkhorn_knopp(scores.detach(), epsilon=0.05, iterations=3)
+
+            # 计算交叉熵: 让网络预测的语义标签 qs 逼近最优传输计算出的目标分布 T_target
+            # qs[v] 是经过 softmax 的概率输出
+            ot_loss = - torch.mean(torch.sum(T_target * torch.log(qs[v] + 1e-8), dim=1))
+
+            # 将 OT 损失加入总损失中
+            loss_list.append(lambda_ot * ot_loss)
+
         loss = sum(loss_list)
         loss.backward()
         optimizer.step()
         tot_loss += loss.item()
-    print('Epoch {}'.format(epoch), 'Loss:{:.6f}'.format(tot_loss/len(data_loader)))
+
+    print('Epoch {}'.format(epoch), 'Loss:{:.6f}'.format(tot_loss / len(data_loader)))
 
 
 def make_pseudo_label(model, device):
@@ -163,7 +248,7 @@ def make_pseudo_label(model, device):
         for v in range(view):
             xs[v] = xs[v].to(device)
         with torch.no_grad():
-            hs, _, _, _ = model.forward(xs)
+            hs, _, _, _, _ = model.forward(xs)
         for v in range(view):
             hs[v] = hs[v].cpu().detach().numpy()
             hs[v] = scaler.fit_transform(hs[v])
@@ -210,7 +295,8 @@ def fine_tuning(epoch, new_pseudo_label):
         for v in range(view):
             xs[v] = xs[v].to(device)
         optimizer.zero_grad()
-        _, qs, _, _ = model(xs)
+        # 修改后:
+        _, qs, _, _, _ = model(xs)
         loss_list = []
         for v in range(view):
             p = new_pseudo_label[v].numpy().T[0]

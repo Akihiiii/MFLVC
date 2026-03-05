@@ -68,7 +68,7 @@ def inference(loader, model, device, view, data_size):
             xs[v] = xs[v].to(device)
         with torch.no_grad():
             qs, preds = model.forward_cluster(xs)
-            hs, _, _, zs = model.forward(xs)
+            hs, _, _, zs, _ = model.forward(xs)
             q = sum(qs)/view
         for v in range(view):
             hs[v] = hs[v].detach()
